@@ -1,0 +1,178 @@
+---
+title: "Plotting UK Grid temperatures during the heatwave and not heatwave years"
+author: ""
+date: "2026-07-20"
+output: html_document
+---
+          - Code to replicate plots and analyses of: A record-breaking heatwave reduces breeding success and impairs growth in a wild bird population -
+                                    Plotting UK Grid temperatures during the heatwave and not heatwave years
+          
+                                 
+The rasters required to reproduce these plots are available at: https://dap.ceda.ac.uk/badc/ukmo-hadobs/data/insitu/MOHC/HadOBS/HadUK-Grid/v1.3.2.ceda/1km/tasmax/day/v20260512/ #[Accessed July 2026]                                 
+#1. Load packages
+```{r}
+library(terra)
+library(ggplot2)
+library(tidyterra)
+library(rnaturalearth)
+library(sf)
+library(scales)
+```
+                               
+#2. Plot
+```{r}
+#1. Load heatwave year rasters
+
+r_2026 <- rast("~tasmax_hadukgrid_uk_1km_day_20260501-20260531.nc") #from your wd
+
+dates_2026 <- as.Date(time(r_2026))
+idx_25_26_2026 <- which(dates_2026 %in% as.Date(c("2026-05-25", "2026-05-26"))) #select days of interest
+r_25_26_2026 <- r_2026[[idx_25_26_2026]]
+r_mean_25_26_2026 <- mean(r_25_26_2026, na.rm = TRUE)
+
+crs(r_mean_25_26_2026) <- "EPSG:27700"
+
+#2. Load nonheatwave years
+data_dir <- "~wd"   
+
+may_files <- list.files(
+  path       = data_dir,
+  pattern    = "^tasmax_hadukgrid_uk_1km_day_.*\\.nc$",
+  full.names = TRUE
+)
+
+length(may_files)
+
+get_may_25_26_mean <- function(f) {
+  r <- rast(f)
+  d <- time(r)
+  keep <- format(d, "%m-%d") %in% c("05-25", "05-26")
+  if (!any(keep)) return(NULL)
+  mean(r[[keep]], na.rm = TRUE)
+}
+
+yearly_means <- lapply(may_files, get_may_25_26_mean)
+yearly_means <- yearly_means[!sapply(yearly_means, is.null)]
+
+length(yearly_means) 
+
+r_stack           <- rast(yearly_means)
+r_mean_25_26_hist <- mean(r_stack, na.rm = TRUE)
+
+crs(r_mean_25_26_hist) <- "EPSG:27700"
+
+#3. Plot
+
+isles <- ne_countries(scale = "large", country = c("United Kingdom", "Ireland"), returnclass = "sf")
+isles <- st_transform(isles, "EPSG:27700")
+
+wytham <- st_sf(
+  name = "Wytham Woods",
+  geometry = st_sfc(st_point(c(-1.3361506763124116, 51.76974195389728)), crs = 4326)
+)
+wytham <- st_transform(wytham, "EPSG:27700")
+
+lat50 <- st_sf(geometry = st_sfc(st_point(c(-2, 49.5)), crs = 4326))
+lat50 <- st_transform(lat50, "EPSG:27700")
+lat50_northing <- st_coordinates(lat50)[, "Y"]
+
+range_2026 <- range(values(r_mean_25_26_2026), na.rm = TRUE)
+range_hist <- range(values(r_mean_25_26_hist), na.rm = TRUE)
+
+r_min <- floor(min(range_2026[1], range_hist[1]))
+r_max <- ceiling(max(range_2026[2], range_hist[2]))
+
+shared_breaks <- scales::breaks_pretty(n = 6)(c(r_min, r_max)) |> c(r_max) |> unique() |> sort()
+
+plot_ext <- ext(r_mean_25_26_2026)
+
+make_map <- function(raster, subtitle_label, panel_letter = NULL) {
+  p <- ggplot() +
+    geom_sf(data = isles, fill = "grey95", colour = "grey60", linewidth = 0.3) +
+    geom_spatraster(data = raster) +
+    scale_fill_viridis_c(
+      option = "inferno",
+      name = NULL,                     # <-- no "Tmax (°C)" title
+      na.value = NA,
+      limits = c(r_min, r_max),
+      breaks = shared_breaks,
+      labels = paste0(shared_breaks, "\u00b0C"),   # <-- ticks read "5°C", "10°C", ...
+      guide = guide_colorbar(barwidth = 1.5, barheight = 8)
+    ) +
+    geom_sf(data = wytham, colour = "black", fill = "white", shape = 21, size = 3.5, stroke = 1) +
+    theme_bw() +
+    labs(x = "Longitude", y = "Latitude") +
+    theme(
+      axis.text = element_text(size = 16),
+      axis.title = element_text(size = 18),
+      legend.position = "inside",
+      legend.position.inside = c(0.05, 0.95),
+      legend.justification = c(0, 1),
+      legend.background = element_rect(fill = alpha("white", 0.7), colour = NA),
+      legend.title = element_text(margin = margin(b = 12), hjust = 0.5, size = 13),
+      legend.text = element_text(size = 11)
+    ) +
+    coord_sf(
+      xlim = c(plot_ext[1] - 20000, plot_ext[2] + 20000),
+      ylim = c(lat50_northing, plot_ext[4] + 20000),
+      expand = FALSE
+    )
+
+  if (!is.null(panel_letter)) {
+    p <- p + annotate(
+      "text",
+      x = -Inf, y = Inf,
+      label = panel_letter,
+      hjust = -0.4, vjust = 1.6,   # nudges it just inside the top-left corner
+      size = 6, fontface = "plain"
+    )
+  }
+
+  p
+}
+
+p_2026 <- make_map(r_mean_25_26_2026, "25-26 May 2026", panel_letter = "A")
+p_hist <- make_map(r_mean_25_26_hist, "25-26 May climatology, 1921-2015", panel_letter = "B")
+
+#join the plots of the two periods
+library(cowplot)
+
+make_map_nolegend <- function(raster, subtitle_label, panel_letter) {
+  make_map(raster, subtitle_label, panel_letter) +
+    theme(legend.position = "none")
+}
+
+# Build one version with a horizontal bottom legend, purely to extract it
+p_for_legend <- make_map(r_mean_25_26_2026, "25-26 May 2026") +
+  guides(fill = guide_colorbar(
+    barwidth  = 15,
+    barheight = 1
+  )) +
+  theme(legend.position = "bottom")
+
+shared_legend <- get_legend(p_for_legend)
+# If get_legend() isn't found: library(ggpubr); shared_legend <- get_legend(p_for_legend)
+
+p_2026_clean <- make_map_nolegend(r_mean_25_26_2026, "25-26 May 2026", "A 2026")
+p_hist_clean <- make_map_nolegend(r_mean_25_26_hist, "25-26 May climatology, 1921-2015", "B 1931-2025")
+
+panels <- plot_grid(p_hist_clean, p_2026_clean,  nrow = 1)
+
+# Centre the legend by padding equally on both sides rather than letting
+# it sit flush left
+legend_row <- plot_grid(NULL, shared_legend, NULL, nrow = 1, rel_widths = c(0.3, 1, 0.3))
+
+final_plot <- plot_grid(panels, legend_row, ncol = 1, rel_heights = c(1, 0.12))
+
+final_plot
+
+#ggsave(
+  "tasmax_2026_vs_historical_side_by_side_2.pdf",
+  final_plot,
+  width  = 14,
+  height = 9,
+  device = cairo_pdf     # ensures fonts render/embed correctly in the PDF
+)
+```
+
+                                 

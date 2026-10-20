@@ -1,0 +1,122 @@
+---
+title: "Analysing and plotting temperature differeces during the heatwave year and the historical data"
+author: ""
+date: "2026-10-20"
+output: html_document
+---
+                              - Code to replicate plots and analyses of: A record-breaking heatwave reduces breeding success and impairs growth in a wild bird population -
+                                                Analysing and plotting temperature differeces during the heatwave year and the historical data
+      
+```{r}
+library(readr)
+library(dplyr)
+library(ggplot2)
+```
+
+#Load data
+```{r}
+combined_temperature_data <- read_csv("combined_temperature_data.csv")
+```
+
+Compute relevant metrics
+```{r}
+summarise_period <- function(data, period_dates, label) {
+  data %>%
+    filter(date %in% period_dates) %>%
+    summarise(
+      period                  = label,
+      n_days                  = n(),
+
+      # Mean temperature values in each period
+      mean_temp_2026          = mean(temp_2026, na.rm = TRUE),
+      mean_temp_2023_2025     = mean(temp_hist, na.rm = TRUE),
+      se_temp_2023_2025       = sqrt(sum(se_hist^2, na.rm = TRUE)) / n_days,
+      mean_temp_cet           = mean(temp_cet,  na.rm = TRUE),
+      se_temp_cet             = sqrt(sum(se_cet^2,  na.rm = TRUE)) / n_days,
+      max_temp_2026           = max(temp_2026, na.rm = TRUE),
+
+      # Differences between heatwave year and hitorical data
+      mean_diff_vs_2023_2025  = mean(diff_vs_2023_2025, na.rm = TRUE),
+      se_diff_vs_2023_2025    = sqrt(sum(diff_vs_2023_2025_se^2, na.rm = TRUE)) / n_days,
+
+      mean_diff_vs_cet_degC   = mean(diff_vs_cet, na.rm = TRUE),
+      se_diff_vs_cet_degC     = sqrt(sum(diff_vs_cet_se^2, na.rm = TRUE)) / n_days,
+
+      mean_diff_vs_cet_SD     = mean(diff_vs_cet_sd, na.rm = TRUE)
+    )
+}
+
+period_full  <- seq(as.Date("2026-05-22"), as.Date("2026-05-29"), by = "day")
+period_peak  <- seq(as.Date("2026-05-25"), as.Date("2026-05-26"), by = "day")
+
+results <- bind_rows(
+  summarise_period(combined_temperature_data, period_full, "22–29 May 2026"),
+  summarise_period(combined_temperature_data, period_peak, "25–27 May 2026")
+)
+
+results
+```
+
+Plot the temperature trends 
+```{r}
+hist_ribbon <- read_csv("hist_ribbon.csv")
+mean_2023_2025 <- read_csv("mean_2023_2025.csv")
+mean_2026 <- read_csv("mean_2026.csv")
+
+
+trends_three_lines_2 <- ggplot() +
+  geom_line(data = mean_2023_2025,
+            aes(x = hour_common, y = mean_temp, colour = "2023-2025 mean"),
+            linewidth = 1) +
+  geom_line(data = mean_2026,
+            aes(x = hour_common, y = mean_temp, colour = "2026"),
+            linewidth = 1) +
+    geom_ribbon(data = hist_ribbon,
+              aes(x = hour_common, ymin = hist_min, ymax = hist_max,
+                  fill = "Historical mean ± range (1772-2025)"),
+              alpha = 0.3) +
+  geom_line(data = hist_ribbon,
+            aes(x = hour_common, y = (hist_min + hist_max) / 2,
+                colour = "Historical mean ± range (1772-2025)"),
+            linewidth = 1, linetype = "solid") +
+  scale_colour_manual(values = c(
+    "2026"                                = "#E05C1A",   # darker orange for white bg
+    "2023-2025 mean"                      = "#69AAA2",   # deeper blue for white bg
+    "Historical mean ± range (1772-2025)" = "grey40"     # dark grey instead of white
+  )) +
+  scale_fill_manual(values = c(
+    "Historical mean ± range (1772-2025)" = "grey60"     # visible ribbon on white bg
+  )) +
+  guides(
+    colour = guide_legend(
+      override.aes = list(
+        linetype  = c("solid", "solid", "solid"),
+        linewidth = c(1.5, 1.5, 1.5),
+        fill      = c(NA, NA, "grey60")
+      )
+    ),
+    fill = "none"
+  ) +
+  scale_x_datetime(date_breaks = "2 days", date_labels = "%b %d") +
+  scale_y_continuous(
+    limits = c(4, 31),          # sets the axis range (min, max)
+    breaks = seq(4, 31, by = 3) # controls where the tick marks/labels appear
+  )+
+  labs(x = NULL, y = "Temperature (°C)", colour = NULL) +
+  theme_bw(base_size = 18) +
+  theme(
+    legend.position  = "bottom",
+    axis.text.x      = element_text(angle = 45, hjust = 1),
+    panel.grid.major = element_line(colour = "grey85",linewidth = 0.25),
+    panel.grid.minor = element_blank(),
+    axis.text        = element_text(colour = "grey20"),
+    axis.title       = element_text(colour = "grey20"),
+    legend.text      = element_text(colour = "grey20")
+  )
+  
+trends_three_lines_2
+```
+
+
+
+

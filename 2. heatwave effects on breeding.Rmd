@@ -1,0 +1,237 @@
+---
+title: "Analysing heatwave effects on the number of fledglings and nestling mass"
+author: ""
+date: "2026-10-20"
+output: html_document
+---
+                             - Code to replicate plots and analyses of: A record-breaking heatwave reduces breeding success and impairs growth in a wild bird population -
+                                                            Analysing heatwave effects on the number of fledglings and nestling mass
+
+```{r}
+library(dplyr)
+library(lmerTest)
+library(ggplot2)
+library(emmeans)
+library(readr)
+```
+
+BODY MASS
+
+Load data and compute sample size per group for SM
+```{r}
+data_mass <- read_csv("data_mass.csv")
+
+samplesize<-data_mass %>% 
+  select(mass_m_c, period, heatwave_year, sp, Section, cs, pnum, year, Mother) %>% 
+  na.omit() %>% 
+  group_by(period,heatwave_year) %>% 
+  summarise(sample=length(mass_m_c)) %>% 
+  ungroup()
+
+samplesize
+```
+
+Model the effects of the heatwave
+```{r}
+#Model with the triple interaction to test species differences 
+mod1<-lmer(mass_m_c~period*heatwave_year*sp+Section+cs+(1|pnum)+(1|year)+(1|Mother), data=data_mass)
+summary(mod1) 
+anova(mod1) 
+
+mod2<-lmer(mass_m_c~period*heatwave_year+sp+Section+cs+(1|pnum)+(1|year)+(1|Mother), data=data_mass)
+summary(mod2) 
+anova(mod2)
+
+#changes per group
+emm_mass <- emmeans(mod2, ~ period * heatwave_year)
+
+period_diffs_mass <- emmeans(emm_mass, pairwise ~ period | heatwave_year)$contrasts
+diff_df_mass <- as.data.frame(confint(period_diffs_mass)) #
+diff_df_mass
+
+#contrast differences
+int_con_mass <- contrast(emm_mass, interaction = c("pairwise", "pairwise"))
+summary(int_con_mass, infer = c(TRUE, TRUE))  
+emm_mass_df <- as.data.frame(emm_mass)
+```
+
+Plot
+```{r}
+pd <- position_dodge(width = 0.2)
+emm_mass_df$period <- factor(emm_mass_df$period, levels = c("pre", "post"))
+
+effects_mass<-ggplot(emm_mass_df, aes(x = period, y = emmean, color = heatwave_year, 
+                    group = heatwave_year)) +
+  geom_line(linewidth = 1, position = pd) +
+  geom_point(size = 5, position = pd) +
+  geom_errorbar(aes(ymin = emmean-SE, ymax = emmean+SE), width = 0.05, position = pd) +
+  scale_color_manual(values = c("no" = "#2A9D8F", "yes" = "#E8927C")) +
+  labs(y = expression("Mean predicted mass"["centred"]), x = "Period")+
+  scale_x_discrete(labels = c("pre" = "Pre-heatwave", "post" = "Heatwave")) +
+  theme_bw() +
+  guides(colour = "none") +
+  theme(
+    axis.title  = element_text(size = 18),
+    axis.text   = element_text(size = 16)
+  ) +
+
+  # blue group: Δ + 95% CI, to the right of "post"
+  annotate("text", x = 1, y = -1.8, 
+           label = "Δ = -1.02±0.06", 
+           color = "#2A9D8F", size = 6, hjust = 0) +
+
+  # orange group: Δ + 95% CI, to the right of "post"
+  annotate("text", x = 1, y = -2, 
+           label = "Δ = -2.06±0.38", 
+           color = "#E8927C", size = 6, hjust = 0) +
+
+  # p-value for the difference between the two deltas
+ annotate("text", x = 1, y = -2.2, 
+           label = "p[diff] == 0.006", 
+           color = "grey40", size = 5, hjust = 0, parse = TRUE, fontface="bold")+
+  coord_cartesian(clip = "off", xlim = c(0.9, 2))
+
+effects_mass
+```
+
+Reanalysis with the phenologically most similar years
+```{r}
+median_ld <- read_csv("median_ld.csv")
+
+#get the earliest years in the dataset (not including 2026, the earliest) and then add 2026 to repeat the models with the most similat data
+yrs_q05 <- c(median_ld$year[median_ld$median_ld <= quantile(median_ld$median_ld, 0.05)], 2026)
+yrs_q10 <- c(median_ld$year[median_ld$median_ld <= quantile(median_ld$median_ld, 0.10)], 2026)
+yrs_q25 <- c(median_ld$year[median_ld$median_ld <= quantile(median_ld$median_ld, 0.25)], 2026)
+yrs_q50 <- c(median_ld$year[median_ld$median_ld <= quantile(median_ld$median_ld, 0.50)], 2026)
+```
+
+Closer 5%
+```{r}
+data_mass_5per<-data_mass %>%
+  filter(year%in%yrs_q05)
+
+mod1_5per<-lmer(mass_m_c~period*heatwave_year*sp+Section+cs+(1|pnum)+(1|year)+(1|Mother), data=data_mass_5per)
+summary(mod1_5per) 
+anova(mod1_5per) 
+
+mod2_5per<-lmer(mass_m_c~period*heatwave_year+sp+Section+cs+(1|pnum)+(1|year)+(1|Mother), data=data_mass_5per)
+summary(mod2_5per) 
+anova(mod2_5per)
+
+#changes per group
+emm_mass_5per <- emmeans(mod2_5per, ~ period * heatwave_year)
+
+period_diffs_mass_5per <- emmeans(emm_mass_5per, pairwise ~ period | heatwave_year)$contrasts
+diff_df_mass_5per <- as.data.frame(confint(period_diffs_mass_5per)) #
+diff_df_mass_5per
+
+#contrast differences
+int_con_mass_5per <- contrast(emm_mass_5per, interaction = c("pairwise", "pairwise"))
+summary(int_con_mass_5per, infer = c(TRUE, TRUE))  
+```
+Repeat for the other thresholds
+
+NUMBER OF FLEDGLINGS
+```{r}
+data_nfledglings <- read_csv("data_nfledglings.csv")
+
+samplesize_nf<-data_nfledglings %>% 
+  select(nf_c, period, heatwave_year, Species, Section, year, Mother) %>% 
+  na.omit() %>% 
+  group_by(period,heatwave_year) %>% 
+  summarise(sample=length(nf_c)) %>% 
+  ungroup()
+
+samplesize_nf
+```
+
+Model the effects of the heatwave
+```{r}
+#model to analyse potential species differences
+mod_nf<-lmer(nf_c~period*heatwave_year*Species+Species+Section+(1|box)+(1|Mother)+(1|year), data=data_nfledglings)
+summary(mod_nf)
+anova(mod_nf) 
+
+#final model
+mod_nf_2<-lmer(nf_c~period*heatwave_year+Species+Section+(1|box)+(1|Mother)+(1|year), data=data_nfledglings)
+summary(mod_nf_2)
+anova(mod_nf_2) 
+
+#change per group
+emm_nf <- emmeans(mod_nf_2, ~ period * heatwave_year)
+
+period_diffs_nf <- emmeans(emm_nf, pairwise ~ period | heatwave_year)$contrasts
+diff_df_nf <- as.data.frame(confint(period_diffs_nf)) #differences no heatwave (-2.609517 [-2.849818 -2.369216]) vs heatwave (-4.476855 [-6.185111 -2.768598])
+diff_df_nf
+
+int_con_nf <- contrast(emm_nf, interaction = c("pairwise", "pairwise"))
+summary(int_con_nf, infer = c(TRUE, TRUE))  # adds CI and test stat
+
+emm_nf_df <- as.data.frame(emm_nf)
+```
+
+Plot
+```{r}
+pd <- position_dodge(width = 0.2)
+emm_nf_df$period <- factor(emm_nf_df$period, levels = c("pre", "post"))
+
+effects_nf<-ggplot(emm_nf_df, aes(x = period, y = emmean, color = heatwave_year, 
+                    group = heatwave_year)) +
+  geom_line(linewidth = 1, position = pd) +
+  geom_point(size = 5, position = pd) +
+  geom_errorbar(aes(ymin = emmean-SE, ymax = emmean+SE), width = 0.05, position = pd) +
+  scale_color_manual(values = c("no" = "#2A9D8F", "yes" = "#E8927C")) +
+ labs(y = expression("Mean predicted number of fledglings"["centred"]), x = "Period")+
+  scale_x_discrete(labels = c("pre" = "Pre-heatwave", "post" = "Heatwave")) +
+  scale_y_continuous(limits = c(-5.3, 2.3)) +
+  theme_bw() +
+  guides(colour = "none") +
+  theme(
+    axis.title  = element_text(size = 18),
+    axis.text   = element_text(size = 16)
+  ) +
+  # blue group: Δ + 95% CI, to the right of "post"
+  annotate("text", x = 0.7, y = -3.6, 
+           label = "Δ = -2.60±0.12", 
+           color = "#2A9D8F", size = 6, hjust = 0) +
+
+  # orange group: Δ + 95% CI, to the right of "post"
+  annotate("text", x = 0.7, y = -3.9, 
+           label = "Δ = -4.47±0.87", 
+           color = "#E8927C", size = 6, hjust = 0) +
+
+  # p-value for the difference between the two deltas
+ annotate("text", x = 0.7, y = -4.2, 
+           label = "p[diff] == 0.033", 
+           color = "grey40", size = 5, hjust = 0, parse = TRUE, fontface="bold")+
+  coord_cartesian(clip = "off", xlim = c(0.9, 2))
+
+effects_nf
+```
+
+Reanalysis with the phenologically most similar years
+
+Closer 5%
+```{r}
+data_nfledglings_5per<-data_nfledglings %>% 
+    filter(year%in%yrs_q05)
+
+mod_nf_5per<-lmer(nf_c~period*heatwave_year*Species+Species+Section+(1|box)+(1|Mother)+(1|year), data=data_nfledglings_5per)
+summary(mod_nf_5per)
+anova(mod_nf_5per) 
+
+mod_nf_2_5per<-lmer(nf_c~period*heatwave_year+Species+Section+(1|box)+(1|Mother)+(1|year), data=data_nfledglings_5per)
+summary(mod_nf_2_5per)
+anova(mod_nf_2_5per) 
+
+#change per group
+emm_nf_5per <- emmeans(mod_nf_2_5per, ~ period * heatwave_year)
+
+period_diffs_nf_5per <- emmeans(emm_nf_5per, pairwise ~ period | heatwave_year)$contrasts
+diff_df_nf_5per <- as.data.frame(confint(period_diffs_nf_5per)) 
+diff_df_nf_5per
+
+int_con_nf_5per <- contrast(emm_nf_5per, interaction = c("pairwise", "pairwise"))
+summary(int_con_nf_5per, infer = c(TRUE, TRUE)) 
+```
+Repeat for the other thresholds
